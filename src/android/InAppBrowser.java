@@ -63,20 +63,15 @@ import java.util.StringTokenizer;
 @SuppressLint("SetJavaScriptEnabled")
 public class InAppBrowser extends CordovaPlugin {
 
-    protected static final String LOG_TAG = "InAppBrowser";
-    private static final String SELF = "_self";
-    private static final String EXIT_EVENT = "exit";
-    private static final String MESSAGE_EVENT = "message";
+    protected static final String TAG = "mytag";
 
 
     private InAppBrowserDialog dialog;
     private WebView inAppWebView;
     private CallbackContext callbackContext;
-    private boolean hadwareBackButton = true;
     private ValueCallback<Uri[]> mUploadCallback;
     private final static int FILECHOOSER_REQUESTCODE = 1;
 
-    private String[] allowedSchemes;
     private InAppBrowserClient currentClient;
 
     /**
@@ -92,26 +87,19 @@ public class InAppBrowser extends CordovaPlugin {
             this.callbackContext = callbackContext;
             final String url = args.getString(0);
             String t = args.optString(1);
-            if (t == null || t.equals("")) {
-                t = SELF;
-            }
+
             final String target = t;
             final HashMap<String, String> features = parseFeature(args.optString(2));
 
-            LOG.d(LOG_TAG, "target = " + target);
+            LOG.d(TAG, "target = " + target);
 
             this.cordova.getActivity().runOnUiThread(new Runnable() {
                 @Override
                 public void run() {
                     String result = "";
 
-                    LOG.d(LOG_TAG, "in blank");
-                    result = showWebPage(url, features);
-
-
-                    PluginResult pluginResult = new PluginResult(PluginResult.Status.OK, result);
-                    pluginResult.setKeepCallback(true);
-                    callbackContext.sendPluginResult(pluginResult);
+                    LOG.d(TAG, "in blank");
+                    showWebPage(url, features);
                 }
             });
         }
@@ -241,13 +229,6 @@ public class InAppBrowser extends CordovaPlugin {
                 // http://developer.android.com/guide/webapps/migrating.html#Threads
                 childView.loadUrl("about:blank");
 
-                try {
-                    JSONObject obj = new JSONObject();
-                    obj.put("type", EXIT_EVENT);
-                    sendUpdate(obj, false);
-                } catch (JSONException ex) {
-                    LOG.d(LOG_TAG, "Should never happen");
-                }
             }
         });
     }
@@ -270,15 +251,6 @@ public class InAppBrowser extends CordovaPlugin {
         return this.inAppWebView.canGoBack();
     }
 
-    /**
-     * Has the user set the hardware back button to go back
-     *
-     * @return boolean
-     */
-    public boolean hardwareBack() {
-        return hadwareBackButton;
-    }
-
 
     private InAppBrowser getInAppBrowser() {
         return this;
@@ -290,7 +262,7 @@ public class InAppBrowser extends CordovaPlugin {
      * @param url      the url to load.
      * @param features jsonObject
      */
-    public String showWebPage(final String url, HashMap<String, String> features) {
+    public void showWebPage(final String url, HashMap<String, String> features) {
 
         final CordovaWebView thatWebView = this.webView;
 
@@ -345,7 +317,7 @@ public class InAppBrowser extends CordovaPlugin {
 
                 inAppWebView.setWebChromeClient(new WebChromeClient() {
                     public boolean onShowFileChooser(WebView webView, ValueCallback<Uri[]> filePathCallback, WebChromeClient.FileChooserParams fileChooserParams) {
-                        LOG.d(LOG_TAG, "File Chooser 5.0+");
+                        LOG.d(TAG, "File Chooser 5.0+");
                         // If callback exists, finish it.
                         if (mUploadCallback != null) {
                             mUploadCallback.onReceiveValue(null);
@@ -382,14 +354,7 @@ public class InAppBrowser extends CordovaPlugin {
                 class JsObject {
                     @JavascriptInterface
                     public void postMessage(String data) {
-                        try {
-                            JSONObject obj = new JSONObject();
-                            obj.put("type", MESSAGE_EVENT);
-                            obj.put("data", new JSONObject(data));
-                            sendUpdate(obj, true);
-                        } catch (JSONException ex) {
-                            LOG.e(LOG_TAG, "data object passed to postMessage has caused a JSON error.");
-                        }
+
                     }
                 }
 
@@ -432,8 +397,8 @@ public class InAppBrowser extends CordovaPlugin {
 
             }
         };
+
         this.cordova.getActivity().runOnUiThread(runnable);
-        return "";
     }
 
     /**
@@ -470,7 +435,7 @@ public class InAppBrowser extends CordovaPlugin {
      * @param intent      the data from android file chooser
      */
     public void onActivityResult(int requestCode, int resultCode, Intent intent) {
-        LOG.d(LOG_TAG, "onActivityResult");
+        LOG.d(TAG, "onActivityResult");
         // If RequestCode or Callback is Invalid
         if (requestCode != FILECHOOSER_REQUESTCODE || mUploadCallback == null) {
             super.onActivityResult(requestCode, resultCode, intent);
@@ -530,7 +495,7 @@ public class InAppBrowser extends CordovaPlugin {
                     cordova.getActivity().startActivity(intent);
                     override = true;
                 } catch (android.content.ActivityNotFoundException e) {
-                    LOG.e(LOG_TAG, "Error dialing " + url + ": " + e.toString());
+                    LOG.e(TAG, "Error dialing " + url + ": " + e.toString());
                 }
             } else if (url.startsWith("geo:") || url.startsWith(WebView.SCHEME_MAILTO) || url.startsWith("market:") || url.startsWith("intent:")) {
                 try {
@@ -539,7 +504,7 @@ public class InAppBrowser extends CordovaPlugin {
                     cordova.getActivity().startActivity(intent);
                     override = true;
                 } catch (android.content.ActivityNotFoundException e) {
-                    LOG.e(LOG_TAG, "Error with " + url + ": " + e.toString());
+                    LOG.e(TAG, "Error with " + url + ": " + e.toString());
                 }
             }
             // If sms:5551212?body=This is the message
@@ -570,31 +535,7 @@ public class InAppBrowser extends CordovaPlugin {
                     cordova.getActivity().startActivity(intent);
                     override = true;
                 } catch (android.content.ActivityNotFoundException e) {
-                    LOG.e(LOG_TAG, "Error sending sms " + url + ":" + e.toString());
-                }
-            }
-            // Test for whitelisted custom scheme names like mycoolapp:// or twitteroauthresponse:// (Twitter Oauth Response)
-            else if (!url.startsWith("http:") && !url.startsWith("https:") && url.matches("^[A-Za-z0-9+.-]*://.*?$")) {
-                if (allowedSchemes == null) {
-                    String allowed = preferences.getString("AllowedSchemes", null);
-                    if (allowed != null) {
-                        allowedSchemes = allowed.split(",");
-                    }
-                }
-                if (allowedSchemes != null) {
-                    for (String scheme : allowedSchemes) {
-                        if (url.startsWith(scheme)) {
-                            try {
-                                JSONObject obj = new JSONObject();
-                                obj.put("type", "customscheme");
-                                obj.put("url", url);
-                                sendUpdate(obj, true);
-                                override = true;
-                            } catch (JSONException ex) {
-                                LOG.e(LOG_TAG, "Custom Scheme URI passed in has caused a JSON error.");
-                            }
-                        }
-                    }
+                    LOG.e(TAG, "Error sending sms " + url + ":" + e.toString());
                 }
             }
             return override;
@@ -633,7 +574,7 @@ public class InAppBrowser extends CordovaPlugin {
             } else {
                 // Assume that everything is HTTP at this point, because if we don't specify,
                 // it really should be.  Complain loudly about this!!!
-                LOG.e(LOG_TAG, "Possible Uncaught/Unknown URI");
+                LOG.e(TAG, "Possible Uncaught/Unknown URI");
                 newloc = "http://" + url;
             }
 
