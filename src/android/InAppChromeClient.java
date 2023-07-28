@@ -18,22 +18,20 @@
 */
 package org.apache.cordova.inappbrowser;
 
-import org.apache.cordova.CordovaWebView;
-import org.apache.cordova.LOG;
-import org.apache.cordova.PluginResult;
-import org.json.JSONArray;
-import org.json.JSONException;
-
-import android.annotation.TargetApi;
-import android.os.Build;
 import android.os.Message;
+import android.webkit.GeolocationPermissions.Callback;
 import android.webkit.JsPromptResult;
 import android.webkit.WebChromeClient;
 import android.webkit.WebResourceRequest;
 import android.webkit.WebStorage;
 import android.webkit.WebView;
 import android.webkit.WebViewClient;
-import android.webkit.GeolocationPermissions.Callback;
+
+import org.apache.cordova.CordovaWebView;
+import org.apache.cordova.LOG;
+import org.apache.cordova.PluginResult;
+import org.json.JSONArray;
+import org.json.JSONException;
 
 public class InAppChromeClient extends WebChromeClient {
 
@@ -45,6 +43,7 @@ public class InAppChromeClient extends WebChromeClient {
         super();
         this.webView = webView;
     }
+
     /**
      * Handle database quota exceeded notification.
      *
@@ -57,8 +56,7 @@ public class InAppChromeClient extends WebChromeClient {
      */
     @Override
     public void onExceededDatabaseQuota(String url, String databaseIdentifier, long currentQuota, long estimatedSize,
-            long totalUsedQuota, WebStorage.QuotaUpdater quotaUpdater)
-    {
+                                        long totalUsedQuota, WebStorage.QuotaUpdater quotaUpdater) {
         LOG.d(LOG_TAG, "onExceededDatabaseQuota estimatedSize: %d  currentQuota: %d  totalUsedQuota: %d", estimatedSize, currentQuota, totalUsedQuota);
         quotaUpdater.updateQuota(MAX_QUOTA);
     }
@@ -79,19 +77,19 @@ public class InAppChromeClient extends WebChromeClient {
      * Tell the client to display a prompt dialog to the user.
      * If the client returns true, WebView will assume that the client will
      * handle the prompt dialog and call the appropriate JsPromptResult method.
-     *
+     * <p>
      * The prompt bridge provided for the InAppBrowser is capable of executing any
      * oustanding callback belonging to the InAppBrowser plugin. Care has been
      * taken that other callbacks cannot be triggered, and that no other code
      * execution is possible.
-     *
+     * <p>
      * To trigger the bridge, the prompt default value should be of the form:
-     *
+     * <p>
      * gap-iab://<callbackId>
-     *
+     * <p>
      * where <callbackId> is the string id of the callback to trigger (something
      * like "InAppBrowser0123456789")
-     *
+     * <p>
      * If present, the prompt message is expected to be a JSON-encoded value to
      * pass to the callback. A JSON_EXCEPTION is returned if the JSON is invalid.
      *
@@ -105,33 +103,31 @@ public class InAppChromeClient extends WebChromeClient {
     public boolean onJsPrompt(WebView view, String url, String message, String defaultValue, JsPromptResult result) {
         // See if the prompt string uses the 'gap-iab' protocol. If so, the remainder should be the id of a callback to execute.
         if (defaultValue != null && defaultValue.startsWith("gap")) {
-            if(defaultValue.startsWith("gap-iab://")) {
+            if (defaultValue.startsWith("gap-iab://")) {
                 PluginResult scriptResult;
                 String scriptCallbackId = defaultValue.substring(10);
                 if (scriptCallbackId.matches("^InAppBrowser[0-9]{1,10}$")) {
-                    if(message == null || message.length() == 0) {
+                    if (message == null || message.length() == 0) {
                         scriptResult = new PluginResult(PluginResult.Status.OK, new JSONArray());
                     } else {
                         try {
                             scriptResult = new PluginResult(PluginResult.Status.OK, new JSONArray(message));
-                        } catch(JSONException e) {
+                        } catch (JSONException e) {
                             scriptResult = new PluginResult(PluginResult.Status.JSON_EXCEPTION, e.getMessage());
                         }
                     }
                     this.webView.sendPluginResult(scriptResult, scriptCallbackId);
                     result.confirm("");
                     return true;
-                }
-                else {
+                } else {
                     // Anything else that doesn't look like InAppBrowser0123456789 should end up here
-                    LOG.w(LOG_TAG, "InAppBrowser callback called with invalid callbackId : "+ scriptCallbackId);
+                    LOG.w(LOG_TAG, "InAppBrowser callback called with invalid callbackId : " + scriptCallbackId);
                     result.cancel();
                     return true;
                 }
-            }
-            else {
+            } else {
                 // Anything else with a gap: prefix should get this message
-                LOG.w(LOG_TAG, "InAppBrowser does not support Cordova API calls: " + url + " " + defaultValue); 
+                LOG.w(LOG_TAG, "InAppBrowser does not support Cordova API calls: " + url + " " + defaultValue);
                 result.cancel();
                 return true;
             }
@@ -143,7 +139,7 @@ public class InAppChromeClient extends WebChromeClient {
      * The InAppWebBrowser WebView is configured to MultipleWindow mode to mitigate a security
      * bug found in Chromium prior to version 83.0.4103.106.
      * See https://bugs.chromium.org/p/chromium/issues/detail?id=1083819
-     *
+     * <p>
      * Valid Urls set to open in new window will be routed back to load in the original WebView.
      *
      * @param view
