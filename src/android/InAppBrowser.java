@@ -18,16 +18,17 @@
 */
 package org.apache.cordova.inappbrowser;
 
+import android.Manifest;
 import android.annotation.SuppressLint;
 import android.annotation.TargetApi;
+import android.app.Activity;
+import android.content.Context;
 import android.content.Intent;
 import android.content.pm.PackageManager;
-import android.content.pm.ResolveInfo;
 import android.graphics.Bitmap;
 import android.graphics.Color;
 import android.net.Uri;
 import android.os.Build;
-import android.os.Parcelable;
 import android.util.Log;
 import android.view.Window;
 import android.view.WindowManager;
@@ -35,7 +36,6 @@ import android.view.WindowManager.LayoutParams;
 import android.webkit.CookieManager;
 import android.webkit.DownloadListener;
 import android.webkit.GeolocationPermissions;
-import android.webkit.JavascriptInterface;
 import android.webkit.ValueCallback;
 import android.webkit.WebChromeClient;
 import android.webkit.WebResourceRequest;
@@ -46,6 +46,9 @@ import android.webkit.WebViewClient;
 import android.widget.LinearLayout;
 import android.widget.RelativeLayout;
 
+import com.getvisitapp.google_fit.data.GoogleFitStatusListener;
+import com.getvisitapp.google_fit.data.GoogleFitUtil;
+
 import org.apache.cordova.CallbackContext;
 import org.apache.cordova.CordovaArgs;
 import org.apache.cordova.CordovaPlugin;
@@ -53,13 +56,11 @@ import org.apache.cordova.CordovaWebView;
 import org.apache.cordova.LOG;
 import org.json.JSONException;
 
-import java.util.ArrayList;
-import java.util.HashMap;
-import java.util.List;
-import java.util.StringTokenizer;
-
+/**
+ * This plugin creates a new webview and renders it inside a dialog
+ */
 @SuppressLint("SetJavaScriptEnabled")
-public class InAppBrowser extends CordovaPlugin {
+public class InAppBrowser extends CordovaPlugin implements GoogleFitStatusListener {
 
     protected static final String TAG = "mytag";
 
@@ -71,6 +72,28 @@ public class InAppBrowser extends CordovaPlugin {
     private final static int FILECHOOSER_REQUESTCODE = 1;
 
     private InAppBrowserClient currentClient;
+    GoogleFitUtil googleFitUtil;
+    Activity activity;
+    Context context;
+
+    public static final String ACTIVITY_RECOGNITION = Manifest.permission.ACTIVITY_RECOGNITION;
+    public static final String LOCATION_PERMISSION = Manifest.permission.ACCESS_FINE_LOCATION;
+
+    public static final int ACTIVITY_RECOGNITION_REQUEST_CODE = 490;
+    public static final int LOCATION_PERMISSION_REQUEST_CODE = 787;
+
+    boolean dailyDataSynced = false;
+    boolean syncDataWithServer = false;
+
+    @Override
+    protected void pluginInitialize() {
+        super.pluginInitialize();
+        Log.d(TAG, "plugin: pluginInitialize() called");
+
+        activity = (Activity) this.cordova.getActivity();
+        context = this.cordova.getContext();
+
+    }
 
     /**
      * Executes the request and returns PluginResult.
@@ -170,22 +193,22 @@ public class InAppBrowser extends CordovaPlugin {
                     settings.setJavaScriptEnabled(true);
                     settings.setJavaScriptCanOpenWindowsAutomatically(true);
                     settings.setBuiltInZoomControls(false);
+                    settings.setGeolocationEnabled(true);
+
                     settings.setPluginState(android.webkit.WebSettings.PluginState.ON);
 
-                    // Add postMessage interface
-                    class JsObject {
-                        @JavascriptInterface
-                        public void postMessage(String data) {
-
-                        }
-                    }
 
                     settings.setMediaPlaybackRequiresUserGesture(false);
-                    inAppWebView.addJavascriptInterface(new JsObject(), "cordova_iab");
                     settings.setDomStorageEnabled(true);
 
                     // Enable Thirdparty Cookies
                     CookieManager.getInstance().setAcceptThirdPartyCookies(inAppWebView, true);
+
+
+                    googleFitUtil = new GoogleFitUtil(activity, InAppBrowser.this, "967914547335-g2ntga70t1i7b19ti91gcubb7agm7rje.apps.googleusercontent.com", true);
+                    inAppWebView.addJavascriptInterface(googleFitUtil.getWebAppInterface(), "Android");
+                    googleFitUtil.init();
+
 
                     inAppWebView.loadUrl(url);
                     inAppWebView.getSettings().setLoadWithOverviewMode(true);
@@ -256,30 +279,6 @@ public class InAppBrowser extends CordovaPlugin {
 
 
     /**
-     * Put the list of features into a hash map
-     *
-     * @param optString
-     * @return
-     */
-    private HashMap<String, String> parseFeature(String optString) {
-
-        HashMap<String, String> map = new HashMap<String, String>();
-        StringTokenizer features = new StringTokenizer(optString, ",");
-        StringTokenizer option;
-        while (features.hasMoreElements()) {
-            option = new StringTokenizer(features.nextToken(), "=");
-            if (option.hasMoreElements()) {
-                String key = option.nextToken();
-                String value = option.nextToken();
-                map.put(key, value);
-            }
-        }
-        return map;
-
-    }
-
-
-    /**
      * Closes the dialog
      */
     public void closeDialog() {
@@ -343,14 +342,177 @@ public class InAppBrowser extends CordovaPlugin {
      * @param intent      the data from android file chooser
      */
     public void onActivityResult(int requestCode, int resultCode, Intent intent) {
-        LOG.d(TAG, "onActivityResult");
+        Log.d(TAG, "onActivityResult called. requestCode: " + requestCode + " resultCode: " + resultCode);
+
         // If RequestCode or Callback is Invalid
-        if (requestCode != FILECHOOSER_REQUESTCODE || mUploadCallback == null) {
+        if (requestCode == 4097 || requestCode == 1900) {
+            cordova.setActivityResultCallback(this);
+            googleFitUtil.onActivityResult(requestCode, resultCode, intent);
+
+        } else if (requestCode != FILECHOOSER_REQUESTCODE || mUploadCallback == null) {
             super.onActivityResult(requestCode, resultCode, intent);
             return;
         }
-        mUploadCallback.onReceiveValue(WebChromeClient.FileChooserParams.parseResult(resultCode, intent));
+        if (mUploadCallback != null) {
+            mUploadCallback.onReceiveValue(WebChromeClient.FileChooserParams.parseResult(resultCode, intent));
+        }
         mUploadCallback = null;
+    }
+
+    /**
+     * This get called from the webview when user taps on [Connect To Google Fit]
+     */
+    @Override
+    public void askForPermissions() {
+        if (dailyDataSynced) {
+            return;
+        }
+        if (android.os.Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            cordova.requestPermissions(this, ACTIVITY_RECOGNITION_REQUEST_CODE, new String[]{ACTIVITY_RECOGNITION});
+        } else {
+            googleFitUtil.askForGoogleFitPermission();
+        }
+    }
+
+    @Override
+    public void onRequestPermissionResult(int requestCode, String[] permissions, int[] grantResults)
+            throws JSONException {
+
+        Log.d("mytag", "onRequestPermissionResult called");
+
+
+        for (int r : grantResults) {
+            if (r == PackageManager.PERMISSION_DENIED) {
+                // this.callbackContext.sendPluginResult(new
+                // PluginResult(PluginResult.Status.ERROR, "Permission Denied"));
+                return;
+            }
+        }
+
+        switch (requestCode) {
+            case ACTIVITY_RECOGNITION_REQUEST_CODE:
+                Log.d(TAG, "ACTIVITY_RECOGNITION_REQUEST_CODE permission granted");
+                cordova.setActivityResultCallback(this);
+                googleFitUtil.askForGoogleFitPermission();
+                break;
+            case LOCATION_PERMISSION_REQUEST_CODE:
+                break;
+        }
+    }
+
+    /**
+     * 1A
+     * This get called after user has granted all the fitness permission
+     */
+
+    @Override
+    public void onFitnessPermissionGranted() {
+        Log.d(TAG, "onFitnessPermissionGranted() called");
+
+        activity.runOnUiThread(new Runnable() {
+            @Override
+            public void run() {
+                googleFitUtil.fetchDataFromFit();
+            }
+        });
+    }
+
+    /**
+     * 1B
+     * This is used to load the Daily Fitness Data into the Home Tab webView.
+     */
+
+    @Override
+    public void loadDailyFitnessData(long steps, long sleep) {
+        String finalString = "window.updateFitnessPermissions(true," + steps + "," +
+                sleep + ")";
+
+        inAppWebView.evaluateJavascript(
+                finalString,
+                null);
+        dailyDataSynced = true;
+    }
+
+
+    /**
+     * 2A
+     * This get used for requesting data that are to be shown in detailed graph
+     */
+
+    @Override
+    public void requestActivityData(String type, String frequency, long timestamp) {
+        Log.d(TAG, "requestActivityData() called.");
+        activity.runOnUiThread(new Runnable() {
+            @Override
+            public void run() {
+                if (type != null && frequency != null) {
+                    googleFitUtil.getActivityData(type, frequency, timestamp);
+                }
+            }
+        });
+    }
+
+    /**
+     * 2B
+     * This get called when google fit return the detailed graph data that was
+     * requested previously
+     */
+
+    @Override
+    public void loadGraphData(String url) {
+        Log.d("mytag", "detailed graph data: " + url);
+        inAppWebView.evaluateJavascript(
+                url,
+                null);
+
+    }
+
+
+    @Override
+    public void syncDataWithServer(String baseUrl, String authToken, long googleFitLastSync, long gfHourlyLastSync) {
+        if (!syncDataWithServer) {
+            Log.d(TAG, "syncDataWithServer() called");
+            activity.runOnUiThread(new Runnable() {
+                @Override
+                public void run() {
+                    googleFitUtil.sendDataToServer(baseUrl + "/", authToken, googleFitLastSync, gfHourlyLastSync);
+                    syncDataWithServer = true;
+                }
+            });
+        }
+    }
+
+    @Override
+    public void askForLocationPermission() {
+        if (!cordova.hasPermission(LOCATION_PERMISSION)) {
+            cordova.requestPermissions(this, LOCATION_PERMISSION_REQUEST_CODE, new String[]{LOCATION_PERMISSION});
+        }
+    }
+
+    @Override
+    public void onFitnessPermissionCancelled() {
+        Log.d("mytag", "onFitnessPermissionCancelled()");
+    }
+
+    @Override
+    public void onFitnessPermissionDenied() {
+        Log.d("mytag", "onFitnessPermissionDenied()");
+    }
+
+
+    @Override
+    public void setDailyFitnessDataJSON(String s) {
+        // not required
+    }
+
+    @Override
+    public void setHourlyFitnessDataJSON(String s) {
+        // not required
+    }
+
+    @Override
+    public void closeVisitPWA() {
+        closeDialog();
     }
 
     /**
